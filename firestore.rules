@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Any signed-in user can read/write any user's drinks.
+    // Safe for a personal tracker — anonymous uids are random 28-char
+    // strings, undiscoverable without the pair code.
+    match /users/{userId}/drinks/{drinkId} {
+      allow read, write: if request.auth != null;
+    }
+    // Pair codes: any signed-in user can create one (writing their own uid),
+    // and any signed-in user can read/delete one (to redeem it).
+    match /pairCodes/{code} {
+      allow read, delete: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+    }
+  }
+}
