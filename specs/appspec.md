@@ -1,6 +1,6 @@
 # Alcbosh — App Spec
 
-Personal alcohol unit tracker. Tuned for the user's typical drinks (Pot 285ml, Pint 568ml, Bottle 330ml, all ~5% ABV). Data syncs across devices via Firebase; falls back to localStorage if Firebase isn't configured.
+Personal alcohol unit tracker. Tuned for the user's typical drinks (Pot 285ml, Bottle 330ml, Pint 568ml, all ~5% ABV). Data syncs across devices via Firebase; falls back to localStorage if Firebase isn't configured.
 
 ## Stack
 
@@ -11,11 +11,12 @@ Personal alcohol unit tracker. Tuned for the user's typical drinks (Pot 285ml, P
 
 ## Screens
 
-Single-page app with a top-nav switching between three views:
+Single-page app with a top-nav switching between four views:
 
-1. **Today** — week + day progress bars, quick-add tiles, today's drink list, AF-day streak
-2. **History** — past weeks grouped, each with a 7-day heatmap
-3. **Settings** — limits, tile editor, device-pairing UI
+1. **Today** — week + day progress bars, quick-add tiles (long-press for custom ABV), Free Day button, today's drink list, AF-day streak
+2. **Weeks** (formerly History) — past weeks grouped, each with a 7-day heatmap
+3. **Cal** — month grid showing units per day + monthly stats
+4. **Settings** (⚙︎) — limits, tile editor, device-pairing UI
 
 ## Core constants
 
@@ -25,7 +26,9 @@ Single-page app with a top-nav switching between three views:
 | Daily warn | 2 units | `units.js` `DEFAULT_SETTINGS.dailyWarn` |
 | Week start | Monday | `units.js` `weekBounds()` |
 | Unit formula | `(ml × ABV%) / 1000` | `units.js` `calcUnits()` |
-| Default tiles | Pot 285/5, Pint 568/5, Bottle 330/5 | `units.js` `DEFAULT_TILES` |
+| Default tiles | Pot 285/5, Bottle 330/5, Pint 568/5 | `units.js` `DEFAULT_TILES` |
+| Long-press threshold | 500ms (≤10px movement) | `App.jsx` `useLongPress()` |
+| Free-day shape | `{ freeDay: true, units: 0, ml: 0, abv: 0, name: 'Free day' }` | `App.jsx` `logFreeDay()` |
 
 All defaults are overridable in Settings; user choices persist to localStorage as `alcbosh:settings`.
 
@@ -44,7 +47,7 @@ initStore() ─┬─► Firebase configured?
 | Path | Role |
 |---|---|
 | `src/App.jsx` | Single root component; holds session, drinks, settings, current screen, and modal state |
-| `src/units.js` | Units math, week-bounds, AF-streak, settings persistence, defaults |
+| `src/units.js` | Units math, week-bounds, AF-streak, settings persistence + migration, free-day predicates, per-day aggregations |
 | `src/store.js` | Storage abstraction — switches between Firestore and localStorage |
 | `src/firebase.js` | Firebase init, auth, Firestore CRUD, pairing primitives |
 | `src/index.css` | Tailwind directives + dark body background |

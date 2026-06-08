@@ -2,10 +2,13 @@
 
 Covers the two stacked progress bars on the Today screen and the alcohol-free day counter.
 
+Free-day markers (see `spec-logging.md`) are filtered out of all unit totals — they only affect the streak and the "Free day ✓" indicator.
+
 ## Week progress
 
 - **Window**: current Mon 00:00 → next Mon 00:00 (`weekBounds()` in `units.js`)
-- **Total**: sum of `units` for all drinks within the window
+- **Source**: `thisWeek.filter(isReal)` — free-day markers excluded
+- **Total**: sum of `units`
 - **Cap**: `settings.weeklyCap` (default 10)
 - **Bar fill %**: `min(100, weekUnits / weeklyCap × 100)`
 - **State** (color):
@@ -20,28 +23,30 @@ Label format: `X.X / N units` (top right of the card).
 Separate card below week progress. Same component (`Bar`), different inputs:
 
 - **Window**: today only (`sameDay(d.at, now)`)
+- **Source**: `todayReal = today.filter(isReal)` — free-day markers excluded
 - **Cap**: `settings.dailyWarn` (default 2)
 - **State** thresholds: same `0.75` and `1.0` ratios → ok / warn / over
-- **Inline message** below bar:
+- **Inline messages** below bar (mutually exclusive, in priority order):
   - `over` → "Over daily limit." (red text)
   - `warn` → "Approaching daily limit." (amber text)
-  - `ok` → no message
+  - free-day marker exists and no real drinks → "Free day ✓" (emerald text)
 
 Number label takes the state color too (red / amber / muted).
 
 ## AF-day streak
 
-Counts consecutive alcohol-free days **ending at most yesterday**. Implementation in `units.js` `afStreak()`:
+Counts consecutive alcohol-free days **ending at most yesterday** (or today if it's still alcohol-free). Implementation in `units.js` `afStreak()`:
 
-1. If today has any drinks → return 0
-2. Otherwise walk backwards day-by-day; stop when a day has drinks
-3. Cap at 365 to avoid runaway loops on empty data
+1. Build `daysWithRealDrinks` set from `drinks.filter(isReal)` keyed by ISO date — free-day markers are NOT included here, so explicitly-marked free days extend the streak.
+2. If today has any real drink → return 0.
+3. Walk backwards day-by-day; stop when a day has any real drink.
+4. Cap iterations at 365.
 
 **Display rules:**
-- Always shown as text inside the empty-state for "Today's drinks" if `streak > 0` and `today.length === 0`: `"N alcohol-free days so far."`
-- Additionally shown as a large emerald hero card at the bottom of Home when `streak > 0 && today.length === 0`
+- Inside the empty-state for "Today's drinks": `"N alcohol-free days so far."` when `streak > 0 && today.length === 0`
+- Large emerald hero card at the bottom of Home when `streak > 0 && todayReal.length === 0` (so it stays visible even if a free-day marker was logged today)
 
-If the user logs a drink today, the streak text disappears (resets to 0 implicitly until tomorrow).
+If the user logs a real drink today, the streak resets to 0 (until tomorrow).
 
 ## Bar component
 

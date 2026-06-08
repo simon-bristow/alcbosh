@@ -12,6 +12,7 @@ Whenever any file under `src/`, `index.html`, `vite.config.js`, `.github/workflo
 | Quick-add tiles, custom drink modal, units calc, edit/delete | `specs/spec-logging.md` |
 | Week/day progress bars, color states, AF streak | `specs/spec-progress.md` |
 | History view, weekly grouping, 7-day heatmap | `specs/spec-history.md` |
+| Calendar view, month grid, monthly stats | `specs/spec-calendar.md` |
 | Settings UI, tile editor, limits, persistence | `specs/spec-settings.md` |
 | Firebase, auth, Firestore model, device pairing, local fallback | `specs/spec-sync.md` |
 | Vite base, GH Pages, Actions workflow, PWA manifest | `specs/spec-deployment.md` |

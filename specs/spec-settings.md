@@ -15,7 +15,11 @@ Both are number inputs with `step="0.1"`.
 
 Three rows, one per tile, with three inline inputs each: **label · ml · ABV%**. Editing any field updates the tile's behavior immediately (next quick-add uses new values) and persists.
 
-The number of tiles is fixed at 3 — there is no add/remove tile UI. Tile IDs (`pot`, `pint`, `bottle`) are stable; renaming the label does not change the ID.
+The number of tiles is fixed at 3 — there is no add/remove tile UI. Tile IDs (`pot`, `bottle`, `pint`) are stable; renaming the label does not change the ID. **The order in which tiles render on the Today screen follows the order of `settings.tiles`** (default: Pot, Bottle, Pint). To re-order, the array must be re-arranged — there's currently no drag-to-reorder UI.
+
+A one-time migration in `units.js` `loadSettings()` rewrites the old default order `[pot, pint, bottle]` to the new `[pot, bottle, pint]` so existing users don't need to touch Settings. Customized stores are left alone.
+
+For one-off ABV overrides without changing the tile default, long-press the tile on the Today screen (see `spec-logging.md`).
 
 ## 3. Sync
 

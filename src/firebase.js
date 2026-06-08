@@ -74,6 +74,7 @@ export function subscribeDrinks(dataUid, cb) {
         abv: data.abv,
         units: data.units,
         name: data.name || null,
+        freeDay: data.freeDay === true,
         at: data.at?.toDate?.() || new Date(),
       }
     })

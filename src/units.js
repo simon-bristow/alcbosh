@@ -34,17 +34,29 @@ export function isoDate(d) {
   return startOfDay(d).toISOString().slice(0, 10)
 }
 
+// A "free day" marker is a drinks entry with units === 0 and freeDay === true.
+// Doesn't count against caps and counts as an alcohol-free day for the streak.
+export function isFreeDay(drink) {
+  return drink?.freeDay === true || (drink?.units === 0 && drink?.name === 'Free day')
+}
+
+export function isReal(drink) {
+  return !isFreeDay(drink) && (drink?.units ?? 0) > 0
+}
+
 // Returns count of consecutive alcohol-free days ending yesterday (or today
-// if no drinks today). Excludes today if today already has drinks.
+// if no real drinks today). Free-day markers do NOT break the streak.
 export function afStreak(drinks, today = new Date()) {
-  const daysWithDrinks = new Set(drinks.map((d) => isoDate(d.at)))
+  const daysWithRealDrinks = new Set(
+    drinks.filter(isReal).map((d) => isoDate(d.at)),
+  )
   const cursor = startOfDay(today)
-  if (daysWithDrinks.has(isoDate(cursor))) return 0
+  if (daysWithRealDrinks.has(isoDate(cursor))) return 0
   let count = 0
   const c = new Date(cursor)
   while (true) {
     c.setDate(c.getDate() - 1)
-    if (daysWithDrinks.has(isoDate(c))) break
+    if (daysWithRealDrinks.has(isoDate(c))) break
     count++
     if (count > 365) break
   }
@@ -53,8 +65,8 @@ export function afStreak(drinks, today = new Date()) {
 
 export const DEFAULT_TILES = [
   { id: 'pot', label: 'Pot', ml: 285, abv: 5.0 },
-  { id: 'pint', label: 'Pint', ml: 568, abv: 5.0 },
   { id: 'bottle', label: 'Bottle', ml: 330, abv: 5.0 },
+  { id: 'pint', label: 'Pint', ml: 568, abv: 5.0 },
 ]
 
 export const DEFAULT_SETTINGS = {
@@ -65,11 +77,26 @@ export const DEFAULT_SETTINGS = {
 
 const SETTINGS_KEY = 'alcbosh:settings'
 
+// One-time migration: if the user's stored tile order matches the OLD default
+// (pot, pint, bottle) exactly, replace it with the new default (pot, bottle, pint).
+function migrate(settings) {
+  const tiles = settings.tiles
+  if (!Array.isArray(tiles) || tiles.length !== 3) return settings
+  const oldOrder = ['pot', 'pint', 'bottle']
+  const idsMatchOld = tiles.every((t, i) => t.id === oldOrder[i])
+  const stillDefaultMl = tiles[0].ml === 285 && tiles[1].ml === 568 && tiles[2].ml === 330
+  const stillDefaultAbv = tiles.every((t) => t.abv === 5.0)
+  if (idsMatchOld && stillDefaultMl && stillDefaultAbv) {
+    return { ...settings, tiles: DEFAULT_TILES }
+  }
+  return settings
+}
+
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return DEFAULT_SETTINGS
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+    return migrate({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) })
   } catch {
     return DEFAULT_SETTINGS
   }
@@ -77,4 +104,24 @@ export function loadSettings() {
 
 export function saveSettings(s) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+}
+
+// Sum of real-drink units per day, keyed by ISO date (YYYY-MM-DD).
+export function unitsByDay(drinks) {
+  const m = {}
+  drinks.forEach((d) => {
+    if (!isReal(d)) return
+    const k = isoDate(d.at)
+    m[k] = (m[k] || 0) + (d.units || 0)
+  })
+  return m
+}
+
+export function freeDaysByDay(drinks) {
+  const m = {}
+  drinks.forEach((d) => {
+    if (!isFreeDay(d)) return
+    m[isoDate(d.at)] = true
+  })
+  return m
 }
