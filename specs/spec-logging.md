@@ -1,10 +1,13 @@
 # Spec — Logging drinks
 
-Covers quick-add tiles (with long-press for one-off ABV), free-day marker, custom-drink modal, units calculation, and edit/delete of existing entries.
+Covers quick-add tiles (with long-press for one-off ABV), free-day marker (with celebration), custom-drink modal, units calculation, edit/delete of existing entries (including date), and the global Recent-drinks list.
 
 ## Quick-add tiles
 
-Three tiles rendered on the Today screen. Each is a single tap → one drink logged with the tile's `ml` + `abv` defaults and `name = tile.label`.
+Three tiles rendered on the Today screen. Each is a single tap → one drink logged with the tile's `ml` + `abv` defaults and `name = tile.label`. The entry's `at` defaults to:
+
+- **viewDate = today** → backend uses `serverTimestamp()` (cloud) or `new Date()` (local)
+- **viewDate = past day** → noon on that day (`12:00` local time)
 
 Defaults (from `units.js` `DEFAULT_TILES`, displayed left-to-right):
 
@@ -18,17 +21,15 @@ Tile renders show: label, `ml · ABV%`, and the precomputed unit value as `+X.Xu
 
 ### Long-press → custom ABV
 
-Long-pressing a tile (≥500ms hold, no significant pointer movement) opens the **AbvQuickModal** instead of logging a default drink:
+Long-pressing a tile (≥500ms hold, <10px movement) opens the **AbvQuickModal** instead of logging a default drink:
 
 - Pre-filled with the tile's current ABV
 - Live preview of `units = calcUnits(tile.ml, abv)`
-- "Log drink" button writes a one-off entry using `tile.ml + tile.label + the new ABV`
+- "Log drink" button writes a one-off entry using `tile.ml + tile.label + the new ABV` and the current `viewDate`
 - Does NOT persist the new ABV as the tile default — that requires Settings
 - Cancel dismisses without logging
 
-Implementation in `App.jsx` `useLongPress({ onLong, ms = 500 })` hook. The hook returns pointer events + a click-wrapper; the wrapper suppresses the synthetic click that follows a long-press so the same gesture never both opens the modal and logs a default drink. Movement of >10px during the hold cancels the timer.
-
-The wider `onContextMenu: preventDefault` stops mobile Safari from popping the text-selection bubble during a long-press.
+Implementation in `App.jsx` `useLongPress({ onLong, ms = 500 })` hook. The hook returns pointer events + a click-wrapper; the wrapper suppresses the synthetic click that follows a long-press so the same gesture never both opens the modal and logs a default drink. The wider `onContextMenu: preventDefault` stops mobile Safari from popping the text-selection bubble during a long-press.
 
 ### Tile reorder migration
 
@@ -36,36 +37,39 @@ The wider `onContextMenu: preventDefault` stops mobile Safari from popping the t
 
 ## Free day
 
-Button on the Today screen, next to "+ Custom". Logs a sentinel entry:
+Button on the Today screen, next to "+ Custom". Logs a sentinel entry on `viewDate`:
 
 ```js
-{ name: 'Free day', ml: 0, abv: 0, units: 0, freeDay: true }
+{ name: 'Free day', ml: 0, abv: 0, units: 0, freeDay: true, at: <viewDate-noon or serverTimestamp> }
 ```
+
+### Celebration animation
+
+Clicking the Free Day button triggers a **`Celebration`** overlay:
+
+- 16 emoji particles (🎉 ✨ 🥳 ⭐ 💚 🌿 🎊 🙌) randomly placed across the screen, each floating upward and fading via the `floatUp` CSS keyframe
+- A central white `✓` pulses in via `burstPulse`
+- Overlay is `pointer-events-none z-30`, auto-dismisses after 1.9s
+
+Keyframes live in `src/index.css`. The component re-randomises particle positions on each mount.
 
 ### State machine
 
-| Today's entries | Button label | Enabled? |
+| viewDate's entries | Button label | Enabled? |
 |---|---|---|
 | no real drinks, no free-day marker | "Free day" | yes |
 | no real drinks, has free-day marker | "Free day ✓" | no (already marked) |
 | any real drinks | "Free day" | no (greyed out) |
 
-The "Today" progress card also shows a small green "Free day ✓" line below the bar when the marker exists and no real drinks have been logged.
+The Day Total card also shows a small green "Free day ✓" line below the bar when the marker exists and no real drinks have been logged on that day.
 
 `isFreeDay(drink)` and `isReal(drink)` helpers in `units.js` are the canonical predicates. Free-day entries never contribute to weekly/daily unit totals.
 
 ## Custom drink
 
-Triggered by the "+ Custom" button. Opens a modal with:
+Triggered by the "+ Custom" button. Opens the `DrinkModal` with `showDate` enabled and initial values `{ name: '', ml: 330, abv: 5, at: <viewDate-noon or now> }`.
 
-- **Name** (optional, free text)
-- **Size (ml)** — number input
-- **ABV (%)** — number input, `step="0.1"`
-- Live preview: `= X.X units`
-
-Initial values: `{ name: '', ml: 330, abv: 5 }`.
-
-Save → adds to drinks with `units = calcUnits(ml, abv)`.
+Save → adds to drinks with `units = calcUnits(ml, abv)` and the modal's chosen date.
 
 ## Units formula
 
@@ -79,18 +83,35 @@ Implemented in `units.js` `calcUnits(ml, abv)`. Recomputed on every save (never 
 
 Display formatting via `fmtUnits(n)` — always 1 decimal place (`2.8`, `0.0`, `10.5`).
 
-## Today's drinks list
+## Recent drinks list (Today screen)
 
-Below the tiles. Filters `drinks` to entries where `sameDay(d.at, now)`. Each row shows:
+Section header: **"Recent drinks"** (not "Today's drinks" — global, not viewDate-scoped).
 
-- Real drink: `name · ml · ABV%` + `HH:MM · X.Xu` + Edit + Delete
-- Free-day marker: `Free day ✓` (green) + `HH:MM` + Delete only (no Edit)
+Source: `drinks.slice(0, 5)` (drinks come from the subscription sorted by `at` desc).
 
-Empty state: `Nothing logged yet.` or `N alcohol-free days so far.` if streak > 0.
+Each row shows:
+- Real drink: `name · ml · ABV%` + `<DayLabel> · HH:MM · X.Xu` + Edit + Delete
+- Free-day marker: `Free day ✓` (green) + `<DayLabel> · HH:MM` + Delete only (no Edit)
+
+`<DayLabel>` is computed by `dayLabelFor(date)`:
+- Today → `Today`
+- Yesterday → `Yesterday`
+- Otherwise → `Sat 6 Jun` (short weekday + day + short month)
+
+Empty state: if no drinks at all, show either `"N alcohol-free days so far."` (if streak > 0) or `"Nothing logged yet."`.
 
 ## Edit flow
 
-Edit reuses `DrinkModal` with `initial={drink}`. On save, calls `update(dataUid, id, { name, ml, abv, units })` — `units` always recomputed from the new ml/abv. Free-day entries cannot be edited (the Edit button is hidden).
+Edit opens `DrinkModal` with `showDate` enabled and `initial={drink}`. Editable fields:
+
+- Name (optional)
+- Size (ml)
+- ABV (%)
+- **Date** — `<input type="date">` capped at today; preserves the original time of day when saving
+
+On save, calls `update(dataUid, id, { name, ml, abv, units, at })`. `units` is always recomputed from the new ml/abv.
+
+Free-day entries cannot be edited (the Edit button is hidden in the recent list).
 
 ## Delete flow
 
@@ -106,6 +127,16 @@ No confirmation. Optimistic UI via Firestore (or localStorage) subscription — 
   abv: number,        // 0 for free-day markers
   units: number,      // 0 for free-day markers; recomputed on every write otherwise
   freeDay?: boolean,  // true on free-day markers
-  at: Date            // logged-at time (serverTimestamp in cloud mode)
+  at: Date            // explicit Date passed for past-day logs / edits; otherwise serverTimestamp on the backend
 }
 ```
+
+## Backend write contract
+
+`firebase.js` `addDrink(uid, drink)`:
+- If `drink.at` is a `Date`, that value is stored (Firestore converts to `Timestamp`)
+- Otherwise `at` defaults to `serverTimestamp()`
+
+`firebase.js` `updateDrink(uid, id, patch)`: merge-set; any `at` in `patch` overrides the stored value.
+
+`store.js` local mode follows the same contract.

@@ -10,3 +10,16 @@ html, body, #root {
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Celebration: emoji float-up for Free Day */
+@keyframes floatUp {
+  0%   { transform: translateY(0) scale(0.5) rotate(0deg);   opacity: 0; }
+  15%  { opacity: 1; }
+  100% { transform: translateY(-60vh) scale(1.15) rotate(20deg); opacity: 0; }
+}
+
+@keyframes burstPulse {
+  0%   { transform: scale(0.85); opacity: 0; }
+  40%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}

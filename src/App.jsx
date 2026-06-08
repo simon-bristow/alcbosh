@@ -4,6 +4,7 @@ import {
   fmtUnits,
   weekBounds,
   sameDay,
+  startOfDay,
   isoDate,
   afStreak,
   loadSettings,
@@ -16,13 +17,15 @@ import {
 import { initStore, subscribe, add, update, remove, isConfigured, startPair, completePair } from './store'
 
 export default function App() {
-  const [session, setSession] = useState(null) // { uid, dataUid, mode }
+  const [session, setSession] = useState(null)
   const [drinks, setDrinks] = useState([])
   const [settings, setSettings] = useState(loadSettings())
-  const [screen, setScreen] = useState('home') // home | history | calendar | settings
+  const [screen, setScreen] = useState('home') // home | calendar | settings
   const [customOpen, setCustomOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [abvEditTile, setAbvEditTile] = useState(null)
+  const [viewDate, setViewDate] = useState(() => startOfDay(new Date()))
+  const [celebrate, setCelebrate] = useState(false)
 
   useEffect(() => {
     const unsub = initStore(setSession)
@@ -36,19 +39,32 @@ export default function App() {
   }, [session])
 
   const now = new Date()
-  const { start: weekStart, end: weekEnd } = weekBounds(now)
-  const thisWeek = useMemo(
+  const isViewingToday = sameDay(viewDate, now)
+
+  // Returns the timestamp to use for a new entry. Today → undefined so the
+  // backend uses serverTimestamp(). Past days → noon on that day.
+  function entryTimestamp() {
+    if (isViewingToday) return undefined
+    const at = new Date(viewDate)
+    at.setHours(12, 0, 0, 0)
+    return at
+  }
+
+  const { start: weekStart, end: weekEnd } = weekBounds(viewDate)
+  const viewWeek = useMemo(
     () => drinks.filter((d) => d.at >= weekStart && d.at < weekEnd),
     [drinks, weekStart, weekEnd],
   )
-  const today = useMemo(() => thisWeek.filter((d) => sameDay(d.at, now)), [thisWeek])
-  const todayReal = today.filter(isReal)
-  const todayFreeMarker = today.find(isFreeDay)
+  const viewDay = useMemo(() => viewWeek.filter((d) => sameDay(d.at, viewDate)), [viewWeek, viewDate])
+  const viewDayReal = viewDay.filter(isReal)
+  const viewDayFreeMarker = viewDay.find(isFreeDay)
 
-  // Caps and warnings ignore free-day markers.
-  const weekUnits = thisWeek.filter(isReal).reduce((s, d) => s + d.units, 0)
-  const dayUnits = todayReal.reduce((s, d) => s + d.units, 0)
+  const weekUnits = viewWeek.filter(isReal).reduce((s, d) => s + d.units, 0)
+  const dayUnits = viewDayReal.reduce((s, d) => s + d.units, 0)
   const streak = useMemo(() => afStreak(drinks, now), [drinks])
+
+  // 5 most recent drinks (drinks are returned sorted at desc by the subscription).
+  const recent = useMemo(() => drinks.slice(0, 5), [drinks])
 
   async function quickAdd(tile, abvOverride) {
     if (!session) return
@@ -58,18 +74,30 @@ export default function App() {
       ml: tile.ml,
       abv,
       units: calcUnits(tile.ml, abv),
+      at: entryTimestamp(),
     })
   }
 
   async function logFreeDay() {
-    if (!session || todayFreeMarker) return
+    if (!session || viewDayFreeMarker) return
     await add(session.dataUid, {
       name: 'Free day',
       ml: 0,
       abv: 0,
       units: 0,
       freeDay: true,
+      at: entryTimestamp(),
     })
+    setCelebrate(true)
+  }
+
+  function shiftDay(delta) {
+    const next = new Date(viewDate)
+    next.setDate(next.getDate() + delta)
+    next.setHours(0, 0, 0, 0)
+    const today = startOfDay(new Date())
+    if (next > today) return
+    setViewDate(next)
   }
 
   return (
@@ -79,12 +107,20 @@ export default function App() {
       {screen === 'home' && (
         <Home
           settings={settings}
+          viewDate={viewDate}
+          isViewingToday={isViewingToday}
+          onPrevDay={() => shiftDay(-1)}
+          onNextDay={() => shiftDay(+1)}
+          onJumpToToday={() => setViewDate(startOfDay(new Date()))}
           weekUnits={weekUnits}
           dayUnits={dayUnits}
           streak={streak}
-          today={today}
-          todayReal={todayReal}
-          todayFreeMarker={todayFreeMarker}
+          viewDay={viewDay}
+          viewDayReal={viewDayReal}
+          viewDayFreeMarker={viewDayFreeMarker}
+          viewWeek={viewWeek}
+          weekStart={weekStart}
+          recent={recent}
           onQuickAdd={quickAdd}
           onLongPressTile={setAbvEditTile}
           onCustom={() => setCustomOpen(true)}
@@ -94,17 +130,18 @@ export default function App() {
         />
       )}
 
-      {screen === 'history' && <History drinks={drinks} settings={settings} />}
-
-      {screen === 'calendar' && <Calendar drinks={drinks} settings={settings} />}
+      {screen === 'calendar' && (
+        <Calendar
+          drinks={drinks}
+          settings={settings}
+          onPickDay={(d) => { setViewDate(d); setScreen('home') }}
+        />
+      )}
 
       {screen === 'settings' && (
         <Settings
           settings={settings}
-          onChange={(s) => {
-            setSettings(s)
-            saveSettings(s)
-          }}
+          onChange={(s) => { setSettings(s); saveSettings(s) }}
           session={session}
         />
       )}
@@ -112,7 +149,8 @@ export default function App() {
       {customOpen && (
         <DrinkModal
           title="Custom drink"
-          initial={{ name: '', ml: 330, abv: 5 }}
+          showDate
+          initial={{ name: '', ml: 330, abv: 5, at: entryTimestamp() || new Date() }}
           onCancel={() => setCustomOpen(false)}
           onSave={async (d) => {
             await add(session.dataUid, { ...d, units: calcUnits(d.ml, d.abv) })
@@ -124,6 +162,7 @@ export default function App() {
       {editing && (
         <DrinkModal
           title="Edit drink"
+          showDate
           initial={editing}
           onCancel={() => setEditing(null)}
           onSave={async (d) => {
@@ -146,6 +185,8 @@ export default function App() {
           }}
         />
       )}
+
+      {celebrate && <Celebration onDone={() => setCelebrate(false)} />}
     </div>
   )
 }
@@ -161,7 +202,6 @@ function Header({ screen, setScreen }) {
       </button>
       <nav className="flex gap-1 text-sm">
         <TabBtn active={screen === 'home'} onClick={() => setScreen('home')}>Today</TabBtn>
-        <TabBtn active={screen === 'history'} onClick={() => setScreen('history')}>Weeks</TabBtn>
         <TabBtn active={screen === 'calendar'} onClick={() => setScreen('calendar')}>Cal</TabBtn>
         <TabBtn active={screen === 'settings'} onClick={() => setScreen('settings')}>⚙︎</TabBtn>
       </nav>
@@ -182,27 +222,31 @@ function TabBtn({ active, onClick, children }) {
   )
 }
 
-// Long-press detector. Returns event handlers + a wrapped click handler.
+function dayLabel(date, isToday) {
+  if (isToday) return 'Today'
+  const yest = startOfDay(new Date())
+  yest.setDate(yest.getDate() - 1)
+  if (sameDay(date, yest)) return 'Yesterday'
+  return date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+}
+
+function dayLabelFor(date) {
+  const today = startOfDay(new Date())
+  return dayLabel(date, sameDay(date, today))
+}
+
+// Long-press detector.
 function useLongPress({ onLong, ms = 500 }) {
   const timer = useRef(null)
   const suppressClick = useRef(false)
   const startPos = useRef({ x: 0, y: 0 })
-
-  const cancel = () => {
-    if (timer.current) {
-      clearTimeout(timer.current)
-      timer.current = null
-    }
-  }
+  const cancel = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null } }
 
   const events = {
     onPointerDown: (e) => {
       cancel()
       startPos.current = { x: e.clientX ?? 0, y: e.clientY ?? 0 }
-      timer.current = setTimeout(() => {
-        suppressClick.current = true
-        onLong()
-      }, ms)
+      timer.current = setTimeout(() => { suppressClick.current = true; onLong() }, ms)
     },
     onPointerMove: (e) => {
       if (!timer.current) return
@@ -217,10 +261,7 @@ function useLongPress({ onLong, ms = 500 }) {
   }
 
   const wrapClick = (handler) => (e) => {
-    if (suppressClick.current) {
-      suppressClick.current = false
-      return
-    }
+    if (suppressClick.current) { suppressClick.current = false; return }
     handler(e)
   }
 
@@ -228,7 +269,9 @@ function useLongPress({ onLong, ms = 500 }) {
 }
 
 function Home({
-  settings, weekUnits, dayUnits, streak, today, todayReal, todayFreeMarker,
+  settings, viewDate, isViewingToday, onPrevDay, onNextDay, onJumpToToday,
+  weekUnits, dayUnits, streak, viewDay, viewDayReal, viewDayFreeMarker,
+  viewWeek, weekStart, recent,
   onQuickAdd, onLongPressTile, onCustom, onFreeDay, onEdit, onDelete,
 }) {
   const pct = Math.min(100, (weekUnits / settings.weeklyCap) * 100)
@@ -238,27 +281,51 @@ function Home({
   const weekState =
     weekUnits >= settings.weeklyCap ? 'over' : weekUnits >= settings.weeklyCap * 0.75 ? 'warn' : 'ok'
 
-  const showFreeDayBtn = todayReal.length === 0
-  const freeDayMarked = !!todayFreeMarker
+  const showFreeDayBtn = viewDayReal.length === 0
+  const freeDayMarked = !!viewDayFreeMarker
+  const label = dayLabel(viewDate, isViewingToday)
+
+  const daysInWeek = useMemo(() => {
+    const acc = {}
+    viewWeek.filter(isReal).forEach((d) => { acc[isoDate(d.at)] = (acc[isoDate(d.at)] || 0) + d.units })
+    return acc
+  }, [viewWeek])
+  const freeInWeek = useMemo(() => {
+    const acc = {}
+    viewWeek.filter(isFreeDay).forEach((d) => { acc[isoDate(d.at)] = true })
+    return acc
+  }, [viewWeek])
 
   return (
     <>
+      {/* Today (or selected day) with prev/next arrows */}
       <section className="rounded-2xl bg-white/5 p-5">
-        <div className="flex items-baseline justify-between mb-2">
-          <span className="text-sm text-white/60">This week</span>
-          <span className="text-sm text-white/60">{fmtUnits(weekUnits)} / {settings.weeklyCap} units</span>
-        </div>
-        <Bar pct={pct} state={weekState} />
-        {!isConfigured && (
-          <p className="text-xs text-amber-300/80 mt-3">
-            Local mode — Firebase not configured. Add your config in <code>src/firebase.js</code> to sync.
-          </p>
-        )}
-      </section>
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <button
+            onClick={onPrevDay}
+            aria-label="Previous day"
+            className="rounded-lg bg-white/5 hover:bg-white/10 px-3 py-1 text-sm shrink-0"
+          >←</button>
 
-      <section className="mt-4 rounded-2xl bg-white/5 p-5">
+          <button
+            onClick={onJumpToToday}
+            disabled={isViewingToday}
+            className="text-sm text-white/80 disabled:cursor-default flex-1 text-center truncate"
+            title={isViewingToday ? '' : 'Jump to today'}
+          >
+            {label}
+          </button>
+
+          <button
+            onClick={onNextDay}
+            disabled={isViewingToday}
+            aria-label="Next day"
+            className="rounded-lg bg-white/5 hover:bg-white/10 px-3 py-1 text-sm shrink-0 disabled:opacity-30 disabled:hover:bg-white/5"
+          >→</button>
+        </div>
+
         <div className="flex items-baseline justify-between mb-2">
-          <span className="text-sm text-white/60">Today</span>
+          <span className="text-xs text-white/50">Day total</span>
           <span className={`text-sm ${dayState === 'over' ? 'text-red-400' : dayState === 'warn' ? 'text-amber-300' : 'text-white/60'}`}>
             {fmtUnits(dayUnits)} / {settings.dailyWarn} units
           </span>
@@ -266,19 +333,59 @@ function Home({
         <Bar pct={dayPct} state={dayState} />
         {dayState === 'over' && <p className="text-xs text-red-300 mt-2">Over daily limit.</p>}
         {dayState === 'warn' && <p className="text-xs text-amber-200 mt-2">Approaching daily limit.</p>}
-        {freeDayMarked && todayReal.length === 0 && (
+        {freeDayMarked && viewDayReal.length === 0 && (
           <p className="text-xs text-emerald-300 mt-2">Free day ✓</p>
         )}
       </section>
 
+      {/* Combined week block: total + heatmap */}
+      <section className="mt-4 rounded-2xl bg-white/5 p-5">
+        <div className="flex items-baseline justify-between mb-2">
+          <span className="text-sm text-white/60">
+            {isViewingToday ? 'This week' : `Week of ${weekStart.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`}
+          </span>
+          <span className="text-sm text-white/60">{fmtUnits(weekUnits)} / {settings.weeklyCap} units</span>
+        </div>
+        <Bar pct={pct} state={weekState} />
+        <div className="grid grid-cols-7 gap-1 mt-4">
+          {Array.from({ length: 7 }).map((_, i) => {
+            const day = new Date(weekStart)
+            day.setDate(day.getDate() + i)
+            const k = isoDate(day)
+            const u = daysInWeek[k] || 0
+            const free = freeInWeek[k]
+            const isViewedDay = sameDay(day, viewDate)
+            const intensity = Math.min(1, u / settings.dailyWarn)
+            const bg = u === 0
+              ? free ? 'bg-emerald-500/15' : 'bg-white/5'
+              : u >= settings.dailyWarn
+                ? 'bg-red-500/70'
+                : 'bg-emerald-500'
+            const today = startOfDay(new Date())
+            const future = day > today
+            return (
+              <div key={i} className="text-center">
+                <div
+                  className={`h-8 rounded ${bg} ${isViewedDay ? 'ring-2 ring-white/40' : ''} ${future ? 'opacity-30' : ''}`}
+                  style={u > 0 && u < settings.dailyWarn ? { opacity: 0.3 + intensity * 0.7 } : undefined}
+                  title={`${day.toDateString()}: ${u > 0 ? fmtUnits(u) + 'u' : free ? 'Free day' : 'no entry'}`}
+                />
+                <div className="text-[10px] text-white/40 mt-1">{['M','T','W','T','F','S','S'][i]}</div>
+              </div>
+            )
+          })}
+        </div>
+        {!isConfigured && (
+          <p className="text-xs text-amber-300/80 mt-3">
+            Local mode — Firebase not configured. Add your config in <code>src/firebase.js</code> to sync.
+          </p>
+        )}
+      </section>
+
+      {/* Quick-add tiles */}
       <section className="mt-4 grid grid-cols-3 gap-3">
         {settings.tiles.map((t) => (
-          <Tile
-            key={t.id}
-            tile={t}
-            onTap={() => onQuickAdd(t)}
-            onLongPress={() => onLongPressTile(t)}
-          />
+          <Tile key={t.id} tile={t} onTap={() => onQuickAdd(t)} onLongPress={() => onLongPressTile(t)} />
         ))}
       </section>
 
@@ -286,9 +393,7 @@ function Home({
         <button
           onClick={onCustom}
           className="rounded-2xl bg-white/5 hover:bg-white/10 py-3 text-sm"
-        >
-          + Custom
-        </button>
+        >+ Custom</button>
         <button
           onClick={onFreeDay}
           disabled={!showFreeDayBtn || freeDayMarked}
@@ -299,37 +404,37 @@ function Home({
                 ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200'
                 : 'bg-white/5 text-white/30 cursor-not-allowed'
           }`}
-        >
-          {freeDayMarked ? 'Free day ✓' : 'Free day'}
-        </button>
+        >{freeDayMarked ? 'Free day ✓' : 'Free day'}</button>
       </div>
 
       <p className="text-[11px] text-white/30 mt-3 text-center">
-        Tap to log · long-press a drink to set custom ABV
+        Tap to log on <span className="text-white/50">{label.toLowerCase()}</span> · long-press a drink to set custom ABV
       </p>
 
       <section className="mt-6">
-        <h2 className="text-sm text-white/60 mb-2">Today’s drinks</h2>
-        {today.length === 0 ? (
+        <h2 className="text-sm text-white/60 mb-2">Recent drinks</h2>
+        {recent.length === 0 ? (
           <p className="text-sm text-white/40">
-            {streak > 0 ? `${streak} alcohol-free day${streak === 1 ? '' : 's'} so far.` : 'Nothing logged yet.'}
+            {streak > 0
+              ? `${streak} alcohol-free day${streak === 1 ? '' : 's'} so far.`
+              : 'Nothing logged yet.'}
           </p>
         ) : (
           <ul className="space-y-2">
-            {today.map((d) => {
+            {recent.map((d) => {
               const free = isFreeDay(d)
               return (
-                <li key={d.id} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2">
-                  <div>
-                    <div className={`text-sm ${free ? 'text-emerald-300' : ''}`}>
+                <li key={d.id} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 gap-2">
+                  <div className="min-w-0">
+                    <div className={`text-sm truncate ${free ? 'text-emerald-300' : ''}`}>
                       {free ? 'Free day ✓' : `${d.name || 'Drink'} · ${d.ml}ml · ${d.abv}%`}
                     </div>
                     <div className="text-xs text-white/50">
-                      {d.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {dayLabelFor(d.at)} · {d.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       {!free && ` · ${fmtUnits(d.units)}u`}
                     </div>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 shrink-0">
                     {!free && (
                       <button onClick={() => onEdit(d)} className="text-xs px-2 py-1 rounded bg-white/5 hover:bg-white/10">Edit</button>
                     )}
@@ -342,7 +447,7 @@ function Home({
         )}
       </section>
 
-      {streak > 0 && todayReal.length === 0 && (
+      {isViewingToday && streak > 0 && viewDayReal.length === 0 && (
         <section className="mt-6 rounded-2xl bg-emerald-500/10 p-4 text-center">
           <div className="text-2xl font-semibold text-emerald-300">{streak}</div>
           <div className="text-xs text-emerald-200/80">alcohol-free day{streak === 1 ? '' : 's'}</div>
@@ -377,73 +482,7 @@ function Bar({ pct, state }) {
   )
 }
 
-function History({ drinks, settings }) {
-  const weeks = useMemo(() => {
-    const m = new Map()
-    drinks.filter(isReal).forEach((d) => {
-      const { start } = weekBounds(d.at)
-      const k = start.toISOString()
-      if (!m.has(k)) m.set(k, { start, items: [] })
-      m.get(k).items.push(d)
-    })
-    return [...m.values()].sort((a, b) => b.start - a.start)
-  }, [drinks])
-
-  const freeMap = useMemo(() => freeDaysByDay(drinks), [drinks])
-
-  if (weeks.length === 0 && Object.keys(freeMap).length === 0) {
-    return <p className="text-sm text-white/40 mt-4">No history yet.</p>
-  }
-
-  return (
-    <div className="space-y-4 mt-2">
-      {weeks.map((w) => {
-        const total = w.items.reduce((s, d) => s + d.units, 0)
-        const over = total >= settings.weeklyCap
-        const days = {}
-        w.items.forEach((d) => {
-          const k = isoDate(d.at)
-          days[k] = (days[k] || 0) + d.units
-        })
-        return (
-          <div key={w.start.toISOString()} className="rounded-2xl bg-white/5 p-4">
-            <div className="flex items-baseline justify-between mb-2">
-              <span className="text-sm font-medium">{w.start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>
-              <span className={`text-sm ${over ? 'text-red-300' : 'text-white/70'}`}>{fmtUnits(total)} / {settings.weeklyCap}u</span>
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {Array.from({ length: 7 }).map((_, i) => {
-                const day = new Date(w.start)
-                day.setDate(day.getDate() + i)
-                const k = isoDate(day)
-                const u = days[k] || 0
-                const free = freeMap[k]
-                const intensity = Math.min(1, u / settings.dailyWarn)
-                const bg = u === 0
-                  ? free ? 'bg-emerald-500/15' : 'bg-white/5'
-                  : u >= settings.dailyWarn
-                    ? 'bg-red-500/70'
-                    : 'bg-emerald-500'
-                return (
-                  <div key={i} className="text-center">
-                    <div
-                      className={`h-8 rounded ${bg}`}
-                      style={u > 0 && u < settings.dailyWarn ? { opacity: 0.3 + intensity * 0.7 } : undefined}
-                      title={`${day.toDateString()}: ${free && u === 0 ? 'Free day' : fmtUnits(u) + 'u'}`}
-                    />
-                    <div className="text-[10px] text-white/40 mt-1">{['M','T','W','T','F','S','S'][i]}</div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function Calendar({ drinks, settings }) {
+function Calendar({ drinks, settings, onPickDay }) {
   const today = new Date()
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
 
@@ -453,7 +492,7 @@ function Calendar({ drinks, settings }) {
   const monthStart = new Date(month.getFullYear(), month.getMonth(), 1)
   const monthEnd = new Date(month.getFullYear(), month.getMonth() + 1, 0)
   const daysInMonth = monthEnd.getDate()
-  const firstWeekday = monthStart.getDay() // 0 Sun .. 6 Sat
+  const firstWeekday = monthStart.getDay()
   const leading = firstWeekday === 0 ? 6 : firstWeekday - 1
 
   const cells = []
@@ -507,9 +546,11 @@ function Calendar({ drinks, settings }) {
           if (future) { textColor = 'text-white/20'; unitColor = 'text-white/20' }
 
           return (
-            <div
+            <button
               key={i}
-              className={`aspect-square rounded flex flex-col items-center justify-center ${bg} ${isToday ? 'ring-2 ring-white/40' : ''}`}
+              onClick={() => !future && onPickDay?.(startOfDay(cell))}
+              disabled={future}
+              className={`aspect-square rounded flex flex-col items-center justify-center ${bg} ${isToday ? 'ring-2 ring-white/40' : ''} ${future ? 'cursor-default' : 'hover:ring-2 hover:ring-white/30'}`}
               title={`${cell.toDateString()}: ${u > 0 ? fmtUnits(u) + 'u' : free ? 'Free day' : 'No entry'}`}
             >
               <div className={`text-xs ${textColor}`}>{cell.getDate()}</div>
@@ -518,7 +559,7 @@ function Calendar({ drinks, settings }) {
               ) : free && !future ? (
                 <div className="text-[10px] text-emerald-300">✓</div>
               ) : null}
-            </div>
+            </button>
           )
         })}
       </div>
@@ -528,6 +569,8 @@ function Calendar({ drinks, settings }) {
         <div className="flex justify-between"><span className="text-white/60">Drinking days</span><span>{realDays}</span></div>
         <div className="flex justify-between"><span className="text-white/60">Free days marked</span><span>{freeDayCount}</span></div>
       </div>
+
+      <p className="text-[11px] text-white/30 mt-3 text-center">Tap a day to jump to it</p>
     </div>
   )
 }
@@ -537,24 +580,15 @@ function Settings({ settings, onChange, session }) {
   const [generatedCode, setGeneratedCode] = useState('')
   const [pairMsg, setPairMsg] = useState('')
 
-  function patch(p) {
-    onChange({ ...settings, ...p })
-  }
+  function patch(p) { onChange({ ...settings, ...p }) }
   function updateTile(id, p) {
-    onChange({
-      ...settings,
-      tiles: settings.tiles.map((t) => (t.id === id ? { ...t, ...p } : t)),
-    })
+    onChange({ ...settings, tiles: settings.tiles.map((t) => (t.id === id ? { ...t, ...p } : t)) })
   }
 
   async function genCode() {
     setPairMsg('')
-    try {
-      const c = await startPair(session.uid)
-      setGeneratedCode(c)
-    } catch (e) {
-      setPairMsg(e.message)
-    }
+    try { setGeneratedCode(await startPair(session.uid)) }
+    catch (e) { setPairMsg(e.message) }
   }
 
   async function redeem() {
@@ -563,9 +597,7 @@ function Settings({ settings, onChange, session }) {
       await completePair(pairCode.trim())
       setPairMsg('Paired — reloading…')
       setTimeout(() => location.reload(), 600)
-    } catch (e) {
-      setPairMsg(e.message)
-    }
+    } catch (e) { setPairMsg(e.message) }
   }
 
   return (
@@ -580,24 +612,9 @@ function Settings({ settings, onChange, session }) {
         <h2 className="text-sm font-medium">Quick-add tiles</h2>
         {settings.tiles.map((t) => (
           <div key={t.id} className="grid grid-cols-[1fr_5rem_5rem] gap-2 items-center">
-            <input
-              className="bg-white/5 rounded px-2 py-1 text-sm"
-              value={t.label}
-              onChange={(e) => updateTile(t.id, { label: e.target.value })}
-            />
-            <input
-              className="bg-white/5 rounded px-2 py-1 text-sm"
-              type="number"
-              value={t.ml}
-              onChange={(e) => updateTile(t.id, { ml: Number(e.target.value) })}
-            />
-            <input
-              className="bg-white/5 rounded px-2 py-1 text-sm"
-              type="number"
-              step="0.1"
-              value={t.abv}
-              onChange={(e) => updateTile(t.id, { abv: Number(e.target.value) })}
-            />
+            <input className="bg-white/5 rounded px-2 py-1 text-sm" value={t.label} onChange={(e) => updateTile(t.id, { label: e.target.value })} />
+            <input className="bg-white/5 rounded px-2 py-1 text-sm" type="number" value={t.ml} onChange={(e) => updateTile(t.id, { ml: Number(e.target.value) })} />
+            <input className="bg-white/5 rounded px-2 py-1 text-sm" type="number" step="0.1" value={t.abv} onChange={(e) => updateTile(t.id, { abv: Number(e.target.value) })} />
           </div>
         ))}
         <p className="text-xs text-white/40">Label · ml · ABV%</p>
@@ -606,30 +623,17 @@ function Settings({ settings, onChange, session }) {
       <section className="rounded-2xl bg-white/5 p-4 space-y-3">
         <h2 className="text-sm font-medium">Sync</h2>
         {!isConfigured ? (
-          <p className="text-xs text-amber-300/80">
-            Add Firebase config in <code>src/firebase.js</code> to enable cloud sync.
-          </p>
+          <p className="text-xs text-amber-300/80">Add Firebase config in <code>src/firebase.js</code> to enable cloud sync.</p>
         ) : (
           <>
             <div className="text-xs text-white/60">Mode: {session?.mode} · uid: {session?.uid?.slice(0, 8)}…</div>
             <div className="space-y-2">
-              <button onClick={genCode} className="w-full rounded bg-white/10 hover:bg-white/15 py-2 text-sm">
-                Generate pair code (this device)
-              </button>
-              {generatedCode && (
-                <div className="text-center text-2xl font-mono tracking-widest py-2">{generatedCode}</div>
-              )}
+              <button onClick={genCode} className="w-full rounded bg-white/10 hover:bg-white/15 py-2 text-sm">Generate pair code (this device)</button>
+              {generatedCode && (<div className="text-center text-2xl font-mono tracking-widest py-2">{generatedCode}</div>)}
             </div>
             <div className="flex gap-2">
-              <input
-                placeholder="Enter code from other device"
-                className="flex-1 bg-white/5 rounded px-2 py-2 text-sm"
-                value={pairCode}
-                onChange={(e) => setPairCode(e.target.value)}
-              />
-              <button onClick={redeem} className="rounded bg-emerald-500/20 hover:bg-emerald-500/30 px-3 text-sm">
-                Pair
-              </button>
+              <input placeholder="Enter code from other device" className="flex-1 bg-white/5 rounded px-2 py-2 text-sm" value={pairCode} onChange={(e) => setPairCode(e.target.value)} />
+              <button onClick={redeem} className="rounded bg-emerald-500/20 hover:bg-emerald-500/30 px-3 text-sm">Pair</button>
             </div>
             {pairMsg && <p className="text-xs text-white/60">{pairMsg}</p>}
           </>
@@ -643,22 +647,33 @@ function Field({ label, value, onChange }) {
   return (
     <label className="flex items-center justify-between gap-3">
       <span className="text-sm">{label}</span>
-      <input
-        type="number"
-        step="0.1"
-        className="w-24 bg-white/5 rounded px-2 py-1 text-sm text-right"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+      <input type="number" step="0.1" className="w-24 bg-white/5 rounded px-2 py-1 text-sm text-right" value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </label>
   )
 }
 
-function DrinkModal({ title, initial, onCancel, onSave }) {
+// Convert a Date to YYYY-MM-DD using local time (matching what <input type="date"> expects).
+function toLocalDateString(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function DrinkModal({ title, initial, showDate, onCancel, onSave }) {
+  const initialAt = useMemo(() => initial.at instanceof Date ? initial.at : new Date(), [initial])
   const [name, setName] = useState(initial.name || '')
   const [ml, setMl] = useState(initial.ml)
   const [abv, setAbv] = useState(initial.abv)
+  const [dateStr, setDateStr] = useState(() => toLocalDateString(initialAt))
   const units = calcUnits(Number(ml) || 0, Number(abv) || 0)
+
+  function buildAt() {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    const at = new Date(initialAt)
+    at.setFullYear(y, m - 1, d)
+    return at
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-10 p-4">
@@ -666,43 +681,31 @@ function DrinkModal({ title, initial, onCancel, onSave }) {
         <h2 className="font-semibold">{title}</h2>
         <label className="block">
           <span className="text-xs text-white/60">Name (optional)</span>
-          <input
-            className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Wine"
-          />
+          <input className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Wine" />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="text-xs text-white/60">Size (ml)</span>
-            <input
-              type="number"
-              className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm"
-              value={ml}
-              onChange={(e) => setMl(Number(e.target.value))}
-            />
+            <input type="number" className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm" value={ml} onChange={(e) => setMl(Number(e.target.value))} />
           </label>
           <label className="block">
             <span className="text-xs text-white/60">ABV (%)</span>
-            <input
-              type="number"
-              step="0.1"
-              className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm"
-              value={abv}
-              onChange={(e) => setAbv(Number(e.target.value))}
-            />
+            <input type="number" step="0.1" className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm" value={abv} onChange={(e) => setAbv(Number(e.target.value))} />
           </label>
         </div>
+        {showDate && (
+          <label className="block">
+            <span className="text-xs text-white/60">Date</span>
+            <input type="date" className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-sm" value={dateStr} max={toLocalDateString(new Date())} onChange={(e) => setDateStr(e.target.value)} />
+          </label>
+        )}
         <div className="text-sm text-emerald-300">= {fmtUnits(units)} units</div>
         <div className="flex gap-2 pt-1">
           <button onClick={onCancel} className="flex-1 rounded bg-white/5 hover:bg-white/10 py-2 text-sm">Cancel</button>
           <button
-            onClick={() => onSave({ name: name || null, ml: Number(ml), abv: Number(abv) })}
+            onClick={() => onSave({ name: name || null, ml: Number(ml), abv: Number(abv), at: buildAt() })}
             className="flex-1 rounded bg-emerald-500/30 hover:bg-emerald-500/40 py-2 text-sm"
-          >
-            Save
-          </button>
+          >Save</button>
         </div>
       </div>
     </div>
@@ -721,26 +724,53 @@ function AbvQuickModal({ tile, onCancel, onLog }) {
         </p>
         <label className="block">
           <span className="text-xs text-white/60">ABV (%)</span>
-          <input
-            type="number"
-            step="0.1"
-            autoFocus
-            className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-base"
-            value={abv}
-            onChange={(e) => setAbv(Number(e.target.value))}
-          />
+          <input type="number" step="0.1" autoFocus className="mt-1 w-full bg-white/5 rounded px-2 py-2 text-base" value={abv} onChange={(e) => setAbv(Number(e.target.value))} />
         </label>
         <div className="text-sm text-emerald-300">= {fmtUnits(units)} units</div>
         <div className="flex gap-2 pt-1">
           <button onClick={onCancel} className="flex-1 rounded bg-white/5 hover:bg-white/10 py-2 text-sm">Cancel</button>
-          <button
-            onClick={() => onLog(Number(abv))}
-            className="flex-1 rounded bg-emerald-500/30 hover:bg-emerald-500/40 py-2 text-sm"
-          >
-            Log drink
-          </button>
+          <button onClick={() => onLog(Number(abv))} className="flex-1 rounded bg-emerald-500/30 hover:bg-emerald-500/40 py-2 text-sm">Log drink</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function Celebration({ onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1900)
+    return () => clearTimeout(t)
+  }, [onDone])
+
+  const particles = useMemo(() => {
+    const emojis = ['🎉', '✨', '🥳', '⭐', '💚', '🌿', '🎊', '🙌']
+    return Array.from({ length: 16 }).map((_, i) => ({
+      key: i,
+      e: emojis[i % emojis.length],
+      left: 6 + Math.random() * 88,
+      delay: Math.random() * 0.35,
+      duration: 1.3 + Math.random() * 0.6,
+      size: 22 + Math.random() * 18,
+    }))
+  }, [])
+
+  return (
+    <div className="fixed inset-0 pointer-events-none z-30 overflow-hidden" aria-hidden="true">
+      <div
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-5xl"
+        style={{ animation: 'burstPulse 0.6s ease-out forwards' }}
+      >✓</div>
+      {particles.map((p) => (
+        <span
+          key={p.key}
+          className="absolute bottom-1/3 select-none"
+          style={{
+            left: `${p.left}%`,
+            fontSize: `${p.size}px`,
+            animation: `floatUp ${p.duration}s ease-out ${p.delay}s forwards`,
+          }}
+        >{p.e}</span>
+      ))}
     </div>
   )
 }

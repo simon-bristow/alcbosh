@@ -8,11 +8,10 @@ Whenever any file under `src/`, `index.html`, `vite.config.js`, `.github/workflo
 
 | Change area | Spec file |
 |---|---|
-| App overview, stack, flow, constraints, file map | `specs/appspec.md` |
-| Quick-add tiles, custom drink modal, units calc, edit/delete | `specs/spec-logging.md` |
-| Week/day progress bars, color states, AF streak | `specs/spec-progress.md` |
-| History view, weekly grouping, 7-day heatmap | `specs/spec-history.md` |
-| Calendar view, month grid, monthly stats | `specs/spec-calendar.md` |
+| App overview, stack, flow, constraints, viewDate, file map | `specs/appspec.md` |
+| Quick-add tiles, long-press ABV, free day + celebration, custom drink, recent list, edit/delete (incl. date) | `specs/spec-logging.md` |
+| Day panel (with prev/next nav), combined week block (total + heatmap), AF streak | `specs/spec-progress.md` |
+| Calendar view, month grid, monthly stats, day-cell tap-to-jump | `specs/spec-calendar.md` |
 | Settings UI, tile editor, limits, persistence | `specs/spec-settings.md` |
 | Firebase, auth, Firestore model, device pairing, local fallback | `specs/spec-sync.md` |
 | Vite base, GH Pages, Actions workflow, PWA manifest | `specs/spec-deployment.md` |

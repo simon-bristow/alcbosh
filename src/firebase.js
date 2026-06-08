@@ -85,10 +85,11 @@ export function subscribeDrinks(dataUid, cb) {
 export async function addDrink(dataUid, drink) {
   if (!isConfigured) return
   const id = crypto.randomUUID()
-  await setDoc(doc(db, 'users', dataUid, 'drinks', id), {
-    ...drink,
-    at: serverTimestamp(),
-  })
+  // If the caller supplied a Date (e.g. when logging on a past day), respect it.
+  // Otherwise use the server timestamp.
+  const at = drink.at instanceof Date ? drink.at : serverTimestamp()
+  const { at: _drop, ...rest } = drink
+  await setDoc(doc(db, 'users', dataUid, 'drinks', id), { ...rest, at })
   return id
 }
 

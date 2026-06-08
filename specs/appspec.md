@@ -11,12 +11,11 @@ Personal alcohol unit tracker. Tuned for the user's typical drinks (Pot 285ml, B
 
 ## Screens
 
-Single-page app with a top-nav switching between four views:
+Single-page app with a top-nav switching between three views:
 
-1. **Today** — week + day progress bars, quick-add tiles (long-press for custom ABV), Free Day button, today's drink list, AF-day streak
-2. **Weeks** (formerly History) — past weeks grouped, each with a 7-day heatmap
-3. **Cal** — month grid showing units per day + monthly stats
-4. **Settings** (⚙︎) — limits, tile editor, device-pairing UI
+1. **Today** (`home`) — selected-day panel with prev/next arrows, combined week block (total + heatmap), quick-add tiles (long-press for custom ABV), Free Day button (with celebration), recent-drinks list, AF-day streak
+2. **Cal** (`calendar`) — month grid showing units per day; tap a day to jump back to Today with that date selected
+3. **Settings** (`settings`, ⚙︎ icon) — limits, tile editor, device-pairing UI
 
 ## Core constants
 
@@ -29,8 +28,20 @@ Single-page app with a top-nav switching between four views:
 | Default tiles | Pot 285/5, Bottle 330/5, Pint 568/5 | `units.js` `DEFAULT_TILES` |
 | Long-press threshold | 500ms (≤10px movement) | `App.jsx` `useLongPress()` |
 | Free-day shape | `{ freeDay: true, units: 0, ml: 0, abv: 0, name: 'Free day' }` | `App.jsx` `logFreeDay()` |
+| Recent-drinks list size | 5 most recent | `App.jsx` `recent = drinks.slice(0, 5)` |
+| Celebration duration | ~1.9s | `Celebration` component + CSS `floatUp` keyframe |
 
 All defaults are overridable in Settings; user choices persist to localStorage as `alcbosh:settings`.
+
+## View date
+
+`App.jsx` keeps a `viewDate` state (default: today's midnight). Prev/next arrows on the Today panel shift it by ±1 day; jumping to today's label resets it. Many derived values follow `viewDate`:
+
+- "Day total" bar uses `viewDate`'s drinks
+- The combined week block uses `weekBounds(viewDate)`
+- Quick-add tiles, Custom Drink, Free Day all default new entries to `viewDate` (noon on past days, serverTimestamp on today)
+
+The **recent drinks list and AF streak** are global — they don't follow `viewDate`. Calendar's "tap a day" sets `viewDate` and switches screen back to Today.
 
 ## State flow
 
@@ -46,11 +57,11 @@ initStore() ─┬─► Firebase configured?
 
 | Path | Role |
 |---|---|
-| `src/App.jsx` | Single root component; holds session, drinks, settings, current screen, and modal state |
+| `src/App.jsx` | Single root component; holds session, drinks, settings, current screen, viewDate, modal state, celebration trigger |
 | `src/units.js` | Units math, week-bounds, AF-streak, settings persistence + migration, free-day predicates, per-day aggregations |
 | `src/store.js` | Storage abstraction — switches between Firestore and localStorage |
-| `src/firebase.js` | Firebase init, auth, Firestore CRUD, pairing primitives |
-| `src/index.css` | Tailwind directives + dark body background |
+| `src/firebase.js` | Firebase init, auth, Firestore CRUD (respects explicit `at` dates), pairing primitives |
+| `src/index.css` | Tailwind directives + dark body background + celebration keyframes (`floatUp`, `burstPulse`) |
 | `public/favicon.svg` | Pint glass with green fill |
 | `public/manifest.webmanifest` | PWA manifest for home-screen install |
 | `.github/workflows/deploy.yml` | Builds + deploys to Pages on every push to `main` |
@@ -59,6 +70,6 @@ initStore() ─┬─► Firebase configured?
 
 - **No backend code** — everything client-side; Firestore is the only server-side dependency.
 - **No router** — `screen` state in `App.jsx` swaps views.
-- **One drink per log** — no batched entries (would complicate the units calc per row).
+- **One drink per log** — no batched entries.
 - **No login UI** — anonymous auth is automatic; pairing is the only user-visible auth action.
-- **Pre-1.0** — breaking changes are fine; no migrations.
+- **Pre-1.0** — breaking changes are fine; no migrations beyond the tile-order one in `units.js`.

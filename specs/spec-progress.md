@@ -1,37 +1,54 @@
-# Spec — Progress bars + AF streak
+# Spec — Day, Week, and AF Streak panels
 
-Covers the two stacked progress bars on the Today screen and the alcohol-free day counter.
+Covers the two stacked panels at the top of the Today screen — the selected-day total (with prev/next nav) and the combined week block (total + 7-day heatmap) — plus the alcohol-free-day counter.
 
-Free-day markers (see `spec-logging.md`) are filtered out of all unit totals — they only affect the streak and the "Free day ✓" indicator.
+Free-day markers are filtered out of all unit totals — they only affect the streak and the inline "Free day ✓" indicator.
 
-## Week progress
+## Day panel (top)
 
-- **Window**: current Mon 00:00 → next Mon 00:00 (`weekBounds()` in `units.js`)
-- **Source**: `thisWeek.filter(isReal)` — free-day markers excluded
-- **Total**: sum of `units`
-- **Cap**: `settings.weeklyCap` (default 10)
-- **Bar fill %**: `min(100, weekUnits / weeklyCap × 100)`
-- **State** (color):
-  - `weekUnits >= weeklyCap` → red (`bg-red-500`)
-  - `weekUnits >= weeklyCap × 0.75` → amber (`bg-amber-400`)
-  - otherwise → emerald (`bg-emerald-400`)
+Renders a card with:
 
-Label format: `X.X / N units` (top right of the card).
+- **Prev / Next arrows** (`←` / `→`) flanking the day label
+- **Day label** — `Today` / `Yesterday` / `Sat 6 Jun` (short weekday + day + short month). Clickable when not on today → jumps to today.
+- **Day total** — sum of real units on the selected day vs `settings.dailyWarn`
+- **Bar** color state (same thresholds as week):
+  - `dayUnits >= dailyWarn` → red
+  - `dayUnits >= dailyWarn × 0.75` → amber
+  - else → emerald
+- Inline messages below the bar:
+  - over → `Over daily limit.` (red)
+  - warn → `Approaching daily limit.` (amber)
+  - free-day marker exists & no real drinks → `Free day ✓` (emerald)
 
-## Daily progress / warning indicator
+Next arrow disabled when `viewDate === today` (no future browsing).
 
-Separate card below week progress. Same component (`Bar`), different inputs:
+## Combined week block
 
-- **Window**: today only (`sameDay(d.at, now)`)
-- **Source**: `todayReal = today.filter(isReal)` — free-day markers excluded
-- **Cap**: `settings.dailyWarn` (default 2)
-- **State** thresholds: same `0.75` and `1.0` ratios → ok / warn / over
-- **Inline messages** below bar (mutually exclusive, in priority order):
-  - `over` → "Over daily limit." (red text)
-  - `warn` → "Approaching daily limit." (amber text)
-  - free-day marker exists and no real drinks → "Free day ✓" (emerald text)
+One card containing both the weekly total and the 7-day heatmap of the visible week.
 
-Number label takes the state color too (red / amber / muted).
+### Header
+
+- Label: `This week` (when viewDate is in the current week) OR `Week of D MMM` (otherwise)
+- Right side: `X.X / N units` (real units only)
+
+### Bar
+
+Single `<Bar pct={...} state={...} />`. Same color thresholds as the day bar but scaled to `settings.weeklyCap`.
+
+### 7-day heatmap
+
+7 columns Mon–Sun. Each day cell:
+
+- `bg-emerald-500` (varying opacity by intensity) for `0 < u < dailyWarn`
+- `bg-red-500/70` for `u >= dailyWarn`
+- `bg-emerald-500/15` for free-day-only days (`u == 0 && free`)
+- `bg-white/5` for empty days
+- Ring `ring-2 ring-white/40` for the selected `viewDate`
+- Future days: `opacity-30`
+
+Letter label `M T W T F S S` below each cell.
+
+Tooltip: `<Date>: X.Xu | Free day | no entry`.
 
 ## AF-day streak
 
@@ -42,9 +59,9 @@ Counts consecutive alcohol-free days **ending at most yesterday** (or today if i
 3. Walk backwards day-by-day; stop when a day has any real drink.
 4. Cap iterations at 365.
 
-**Display rules:**
-- Inside the empty-state for "Today's drinks": `"N alcohol-free days so far."` when `streak > 0 && today.length === 0`
-- Large emerald hero card at the bottom of Home when `streak > 0 && todayReal.length === 0` (so it stays visible even if a free-day marker was logged today)
+**Display rules** (only when viewing today, i.e. `isViewingToday`):
+- If `recent.length === 0`, the empty-state shows `"N alcohol-free days so far."`
+- Large emerald hero card at the bottom of Home when `streak > 0 && viewDayReal.length === 0`
 
 If the user logs a real drink today, the streak resets to 0 (until tomorrow).
 

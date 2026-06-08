@@ -70,9 +70,19 @@ All three derived from the same `cells` array used to render the grid (already f
 
 Both filter via the canonical `isReal` / `isFreeDay` predicates.
 
+## Day-cell tap
+
+Each non-future day cell is a `<button>`. Tapping it calls the parent's `onPickDay(date)`, which:
+
+1. Sets `viewDate = startOfDay(date)` in `App.jsx`
+2. Switches `screen` back to `home`
+
+This is how the user navigates from the month overview to a specific day's logging UI. The Today screen's prev/next arrows then move ±1 day from there.
+
+Past-day Free Day markers can be added via this flow (jump to that day in Cal → Free day button on Today).
+
 ## Future enhancements (not implemented)
 
-- Tap a day cell to view that day's drinks
-- Mark past days as free-days (currently only today's marker is supported)
 - Swipe-left/right between months
 - Pagination of months in a year-overview ribbon
+- Multi-month statistics view
